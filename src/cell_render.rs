@@ -228,8 +228,8 @@ fn paint_node(
 
             // Render block children as their own boxes.
             // Respect computed rows/grid placement and reversed flex directions.
-            // Keep the vertical fallback only for unwrapped forward columns:
-            // sub-cell text boxes still need separate rows after cell rounding.
+            // Keep vertical fallback for ordinary blocks and unwrapped forward
+            // columns: sub-cell text boxes need separate rows after cell rounding.
             let positioned_children = node.style.display == Display::Grid
                 || (node.style.display == Display::Flex
                     && (node.style.flex_direction != FlexDirection::Column

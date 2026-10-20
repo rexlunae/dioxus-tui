@@ -93,3 +93,20 @@ fn forward_flex_column_retains_cell_rounding_fallback() {
     assert_eq!(text_position(&surface, "FIRST_ITEM"), (0, 0));
     assert_eq!(text_position(&surface, "SECOND_ITEM"), (0, 1));
 }
+
+#[test]
+fn wrapped_flex_column_keeps_new_column_position() {
+    fn app() -> Element {
+        rsx! {
+            div { style: "display:flex;flex-direction:column;flex-wrap:wrap;align-content:flex-start;width:640px;height:64px",
+                div { style: "width:128px;height:32px;flex-shrink:0", "FIRST_ITEM" }
+                div { style: "width:128px;height:32px;flex-shrink:0", "SECOND_ITEM" }
+                div { style: "width:128px;height:32px;flex-shrink:0", "THIRD_ITEM" }
+            }
+        }
+    }
+    let surface = render(app);
+    assert_eq!(text_position(&surface, "FIRST_ITEM"), (0, 0));
+    assert_eq!(text_position(&surface, "SECOND_ITEM"), (0, 2));
+    assert_eq!(text_position(&surface, "THIRD_ITEM"), (16, 0));
+}

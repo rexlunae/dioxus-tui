@@ -12,7 +12,7 @@ use crate::config::{ImageDowngrade, ImagePolicy};
 use crate::image::{load_png_image, placed_image_from_png, PlacedImage};
 use std::collections::VecDeque;
 use style::color::AbsoluteColor;
-use taffy::{Display, FlexDirection};
+use taffy::{Display, FlexDirection, FlexWrap};
 use unicode_width::UnicodeWidthChar;
 
 pub fn paint_surface(
@@ -228,11 +228,12 @@ fn paint_node(
 
             // Render block children as their own boxes.
             // Respect computed rows/grid placement and reversed flex directions.
-            // Keep the vertical fallback for forward columns: text boxes smaller
-            // than a terminal cell still need separate rows after cell rounding.
+            // Keep the vertical fallback only for unwrapped forward columns:
+            // sub-cell text boxes still need separate rows after cell rounding.
             let positioned_children = node.style.display == Display::Grid
                 || (node.style.display == Display::Flex
-                    && node.style.flex_direction != FlexDirection::Column);
+                    && (node.style.flex_direction != FlexDirection::Column
+                        || node.style.flex_wrap != FlexWrap::NoWrap));
             let mut flow_y = rect.y;
             for child_id in node.children.iter().copied() {
                 let Some(child) = doc.get_node(child_id) else {

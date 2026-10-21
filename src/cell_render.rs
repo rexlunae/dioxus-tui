@@ -179,6 +179,47 @@ fn paint_node(
                 }
             }
 
+            // Positioned layers do not consume normal-flow fallback space.
+            let mut children: Vec<_> = node
+                .children
+                .iter()
+                .copied()
+                .filter_map(|id| doc.get_node(id))
+                .filter(|child| !is_display_none(child) && is_blockish(child))
+                .collect();
+            children.sort_by_key(|child| {
+                if is_out_of_flow_box(child) {
+                    let z = child.z_index();
+                    (if z < 0 { 0 } else { 2 }, z)
+                } else {
+                    (1, 0)
+                }
+            });
+            let negative_count = children
+                .partition_point(|child| is_out_of_flow_box(child) && child.z_index() < 0);
+            // Negative layers are above this box's background but below both
+            // its direct inline text and its normal-flow child boxes.
+            for child in &children[..negative_count] {
+                paint_node(
+                    surface,
+                    images,
+                    doc,
+                    child,
+                    area,
+                    metrics,
+                    color_mode,
+                    truecolor,
+                    fallback_fg,
+                    node_style,
+                    draw_mode,
+                    palette_roles,
+                    image_policy,
+                    image_downgrade,
+                    inline_images_supported,
+                    offset,
+                )?;
+            }
+
             // Render inline text content within this node's box.
             if rect.width > 0 && rect.height > 0 {
                 let fg = Some(
@@ -212,7 +253,8 @@ fn paint_node(
                         );
                     }
                 } else if node.data.is_element_with_tag_name(&local_name!("button")) {
-                    let label = node.text_content();
+                    let mut label = String::new();
+                    append_visible_text(doc, node, &mut label);
                     let _ = write_wrapped(surface, text_bounds, (rect.x, rect.y), label.as_str(), style);
                 } else {
                     paint_inline_text(
@@ -228,25 +270,8 @@ fn paint_node(
                 }
             }
 
-            // Preserve local positioned-sibling layers without letting their
-            // computed boxes consume or inherit normal-flow fallback space.
-            let mut children: Vec<_> = node
-                .children
-                .iter()
-                .copied()
-                .filter_map(|id| doc.get_node(id))
-                .filter(|child| !is_display_none(child) && is_blockish(child))
-                .collect();
-            children.sort_by_key(|child| {
-                if is_out_of_flow_box(child) {
-                    let z = child.z_index();
-                    (if z < 0 { 0 } else { 2 }, z)
-                } else {
-                    (1, 0)
-                }
-            });
             let mut flow_y = rect.y;
-            for child in children {
+            for child in &children[negative_count..] {
                 let child_rect_raw = node_rect(doc, child, area, metrics);
                 let mut child_offset = offset;
                 if !is_out_of_flow_box(child) {
@@ -482,6 +507,20 @@ fn clip_rect(mut rect: Rect, area: Rect) -> Rect {
         rect.height = area.height.saturating_sub(rect.y);
     }
     rect
+}
+
+fn append_visible_text(doc: &BaseDocument, node: &Node, output: &mut String) {
+    if is_display_none(node) {
+        return;
+    }
+    if let blitz_dom::node::NodeData::Text(text) = &node.data {
+        output.push_str(text.content.as_str());
+    }
+    for child_id in &node.children {
+        if let Some(child) = doc.get_node(*child_id) {
+            append_visible_text(doc, child, output);
+        }
+    }
 }
 
 fn is_display_none(node: &Node) -> bool {

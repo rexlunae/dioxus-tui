@@ -153,3 +153,37 @@ fn hidden_block_does_not_advance_flow() {
     assert_eq!(position(&surface, "BEFORE"), (0, 0));
     assert_eq!(position(&surface, "AFTER"), (0, 1));
 }
+
+#[test]
+fn visible_button_omits_hidden_descendants_from_its_label() {
+    fn app() -> Element {
+        rsx! {
+            button {
+                "BEFORE"
+                span { span { style: "display:none", "HIDDEN_MARKER" } }
+                "AFTER"
+            }
+        }
+    }
+    let surface = render(app);
+    assert_eq!(position(&surface, "BEFOREAFTER"), (0, 0));
+    let remaining = surface.lines().join("\n").replacen("BEFOREAFTER", "", 1);
+    assert!(remaining.chars().all(char::is_whitespace), "{remaining}");
+}
+
+#[test]
+fn negative_positioned_layer_paints_below_direct_inline_text() {
+    fn app() -> Element {
+        rsx! {
+            div { style: "position:relative;width:640px;height:320px",
+                "FLOW"
+                dialog { open: true, style: "position:absolute;z-index:-1;left:0;top:0;display:block;width:320px;height:64px;margin:0;padding:0;border:0",
+                    p { "BACK_TAIL" }
+                }
+            }
+        }
+    }
+    let surface = render(app);
+    assert_eq!(position(&surface, "FLOW"), (0, 0));
+    assert_eq!(position(&surface, "TAIL"), (5, 0));
+}

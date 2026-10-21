@@ -128,6 +128,9 @@ fn paint_node(
     inline_images_supported: bool,
     offset: (i32, i32),
 ) -> crate::error::Result<()> {
+    if is_display_none(node) {
+        return Ok(());
+    }
     match &node.data {
         blitz_dom::node::NodeData::Element(_) | blitz_dom::node::NodeData::AnonymousBlock(_) => {
             let local_style = style_overrides(node, color_mode, truecolor);
@@ -225,41 +228,54 @@ fn paint_node(
                 }
             }
 
-            // Render block children as their own boxes.
+            // Preserve local positioned-sibling layers without letting their
+            // computed boxes consume or inherit normal-flow fallback space.
+            let mut children: Vec<_> = node
+                .children
+                .iter()
+                .copied()
+                .filter_map(|id| doc.get_node(id))
+                .filter(|child| !is_display_none(child) && is_blockish(child))
+                .collect();
+            children.sort_by_key(|child| {
+                if is_out_of_flow_box(child) {
+                    let z = child.z_index();
+                    (if z < 0 { 0 } else { 2 }, z)
+                } else {
+                    (1, 0)
+                }
+            });
             let mut flow_y = rect.y;
-            for child_id in node.children.iter().copied() {
-                let Some(child) = doc.get_node(child_id) else {
-                    continue;
-                };
-                if is_blockish(child) {
-                    let child_rect_raw = node_rect(doc, child, area, metrics);
+            for child in children {
+                let child_rect_raw = node_rect(doc, child, area, metrics);
+                let mut child_offset = offset;
+                if !is_out_of_flow_box(child) {
                     let child_rect = offset_rect(child_rect_raw, offset, area);
-                    let mut child_offset = offset;
                     if child_rect.y < flow_y {
                         let delta = flow_y.saturating_sub(child_rect.y) as i32;
                         child_offset.1 = child_offset.1.saturating_add(delta);
                     }
                     let adjusted_rect = offset_rect(child_rect_raw, child_offset, area);
                     flow_y = adjusted_rect.y.saturating_add(adjusted_rect.height);
-                    paint_node(
-                        surface,
-                        images,
-                        doc,
-                        child,
-                        area,
-                        metrics,
-                        color_mode,
-                        truecolor,
-                        fallback_fg,
-                        node_style,
-                        draw_mode,
-                        palette_roles,
-                        image_policy,
-                        image_downgrade,
-                        inline_images_supported,
-                        child_offset,
-                    )?;
                 }
+                paint_node(
+                    surface,
+                    images,
+                    doc,
+                    child,
+                    area,
+                    metrics,
+                    color_mode,
+                    truecolor,
+                    fallback_fg,
+                    node_style,
+                    draw_mode,
+                    palette_roles,
+                    image_policy,
+                    image_downgrade,
+                    inline_images_supported,
+                    child_offset,
+                )?;
             }
         }
         blitz_dom::node::NodeData::Text(_) => {}
@@ -317,6 +333,9 @@ fn paint_inline_text(
         let Some(child) = doc.get_node(child_id) else {
             continue;
         };
+        if is_display_none(child) {
+            continue;
+        }
         match &child.data {
             blitz_dom::node::NodeData::Text(text) => {
                 (cursor_x, cursor_y) = write_wrapped(
@@ -386,6 +405,9 @@ fn paint_inline_children(
         let Some(child) = doc.get_node(child_id) else {
             continue;
         };
+        if is_display_none(child) {
+            continue;
+        }
         match &child.data {
             blitz_dom::node::NodeData::Text(text) => {
                 cursor = write_wrapped(surface, bounds, cursor, text.content.as_str(), inherited);
@@ -462,8 +484,19 @@ fn clip_rect(mut rect: Rect, area: Rect) -> Rect {
     rect
 }
 
+fn is_display_none(node: &Node) -> bool {
+    node.primary_styles()
+        .is_some_and(|style| style.clone_display().is_none())
+}
+
+fn is_out_of_flow_box(node: &Node) -> bool {
+    node.style.position == taffy::Position::Absolute && !is_display_none(node)
+}
+
 fn is_blockish(node: &Node) -> bool {
-    if node.is_or_contains_block() {
+    // Native block-flow classification deliberately excludes positioned nodes;
+    // they still need their own paint box rather than inline text flattening.
+    if is_out_of_flow_box(node) || node.is_or_contains_block() {
         return true;
     }
 
